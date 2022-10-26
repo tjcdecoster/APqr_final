@@ -43,8 +43,6 @@ class gAPqr7 : public DefaultGUIModel
 		double slope_thresh;
 		double Iout;
 		double systime;
-		double count_r;
-		double count2_r;
 		long long count;
 		double Vm_log[10000] = {0};		
 		double ideal_AP[10000] = {0};

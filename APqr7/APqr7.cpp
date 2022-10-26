@@ -80,7 +80,6 @@ STATE: non-modifiable variable in the code
 static DefaultGUIModel::variable_t vars[] = {
 	{ "Vm (mV)", "Membrane potential (mV)", DefaultGUIModel::INPUT, },
 	{ "Iout (pA)", "Output current (pA)", DefaultGUIModel::OUTPUT, },
-	{ "iAP", "ideal AP", DefaultGUIModel::OUTPUT, },
 	{ "Cm (pF)", "pF", DefaultGUIModel::PARAMETER
 	| DefaultGUIModel::DOUBLE, },
 	{ "V_cutoff (mV)", "Threshold potential for the detection of the beginning of an AP, together with Slope_thresh",
@@ -108,29 +107,28 @@ static DefaultGUIModel::variable_t vars[] = {
 	{ "APs2", "APs", DefaultGUIModel::STATE, },
 	{ "log_ideal_on2", "log_ideal_on", DefaultGUIModel::STATE, },
 	{ "BCL2", "BCL", DefaultGUIModel::STATE, },
-	{ "enter2", "enter", DefaultGUIModel::STATE, },
 	{ "Rm2 (MOhm)", "MOhm", DefaultGUIModel::STATE, },
 	{ "act2", "0 or 1", DefaultGUIModel::STATE, },
-	{ "count", "number", DefaultGUIModel::STATE, },
-	{ "count2", "number", DefaultGUIModel::STATE, },
-	{ "modulo_state", "number", DefaultGUIModel::STATE, },
 };
 
 /*
 num_vars
 --------
-
+variable denoting the amount of variables that is displayed in the GUI
 */
 static size_t num_vars = sizeof(vars) / sizeof(DefaultGUIModel::variable_t);
 
 /*
 gAPqr7
 ------
+This function constructs the actual GUI by basing itself on the Default GUI Model.
+It creates a module with a name, initializes the GUI, initializes the parameters,
+adds a refresh, and allows you to resize.
 
 IN:
-	*)
+	*) None
 OUT:
-	*)
+	*) None
 */
 gAPqr7::gAPqr7(void) : DefaultGUIModel("APqr7", ::vars, ::num_vars)
 {
@@ -148,6 +146,8 @@ gAPqr7::~gAPqr7(void) {}
 /*
 cleanup
 -------
+The APqr software makes use of three list structures which need cleaning after
+a reset of parameters. The cleanup function takes care of this.
 
 IN:
 	*) None
@@ -166,6 +166,12 @@ void gAPqr7::cleanup()
 /*
 execute
 -------
+This is the main funtcion of the code that is looped through real-time.
+It contains the four main parts of the algorithm:
+	1) Recording the ideal AP
+	2) Detecting AP upstrokes
+	3) Computing AP correction and outputting this
+	4) Updating the necessary variables
 
 IN:
 	*) None
@@ -175,78 +181,159 @@ OUT:
 */
 void gAPqr7::execute(void)
 {
-	systime = count * period; // time in milli-seconds
-	Vm = input(0) * 1e2; // convert 10V to mV. Divided by 10 because the amplifier produces 10-fold amplified voltages. Multiplied by 1000 to convert V to mV.
+	systime = count * period; 	// time in milli-seconds
+	Vm = input(0) * 1e2; 		// convert 10V to mV. Divided by 10 because
+								// the amplifier produces 10-fold amplified
+								// voltages. Multiplied by 1000 to convert
+								// V to mV.
 
-	Vm_log[count % (int)modulo] = Vm;
+	Vm_log[count % (int)modulo] = Vm; 	// Logging the measured Vm in a list
+										// where the modulo component makes
+										// sure you keep cycling when you have
+										// reached the maximum number in the list.
 
+	// ****************************
+	// ****************************
+	// ** Recording the ideal AP **
+	// ****************************
+	// ****************************
 	if(count>(int)(1/period)-1 && (Vm - Vm_log[(count-(int)(1/period)) % (int)modulo]) >= slope_thresh && APs<lognum && enter == 0 && Vm > V_cutoff)
 	{
-		BCL = (APs==-1? 0: (BCL*APs + count2)/(APs+1));
-		log_ideal_on = 1;
-		count2 = 0;
-		enter = 1;
-		APs++;
+		// This statement is entered whenever an upstroke is detected and the amount of
+		// recorded APs is smaller than lognum.
+		// The if conditions measure the following:
+		// 1) Whether you are far enough in the recording such that you don't accidentaly
+		//    start in an ongoing AP
+		// 2) Whether two consecutive measuring points show a large enough slope that can
+		//    be identified with an upstroke
+		// 3) Whether less than lognum APs were recorded
+		// 4) Whether you are currently not in an action potential
+		// 5) Whether the mesured voltage is above a voltage treshold
+
+		BCL = (APs==-1? 0: (BCL*APs + count2)/(APs+1)); // Rolling average of the basic cycle length
+		log_ideal_on = 1; // Switches on logging the AP
+		count2 = 0; // Resets the logging counter
+		enter = 1; // Switches on the indicator that an AP has started
+		APs++; // Counts the AP upstrokes that have passed
 	}
 
 	if((Vm - Vm_log[(count-(int)(1/period)) % (int)modulo]) < 0 && enter == 1)
 	{
-		enter = 0;
+		// This statement is entered whenever the upstroke phase of an AP is over.
+		// The if conditions measure the following:
+		// 1) Whether two consecutive measuring points show a negative slope
+		// 2) Whether you currently are in an ongoing AP
+
+		enter = 0; // Switches off the indicator that an AP has started
 	}
 
 	if(APs<lognum && log_ideal_on == 1)
 	{
-		ideal_AP[count2] = (ideal_AP[count2]*APs + Vm)/(APs+1);
-		count2++;
+		// This statement is entered whenever logging of the AP is on
+		// The if conditions measure the following:
+		// 1) Whether less than lognum APs were recorded
+		// 2) Whether the AP should be logged
+		ideal_AP[count2] = (ideal_AP[count2]*APs + Vm)/(APs+1); // Rolling average of the AP values
+		count2++; // Increasing the logging counter
 	}
 
+	// ****************************
+	// ****************************
+	// ** Detecting AP upstrokes **
+	// ****************************
+	// ****************************
 	if (act == 0 && (Vm - Vm_log[(count-(int)(1/period)) % (int)modulo]) >= slope_thresh && APs >= lognum && Vm > V_cutoff)
 	{
-		count = 0;		
-		act = 1;
+		// This statement is entered whenever an upstroke is detected after the
+		// ideal APs have been recorded.
+		// The if conditions measure the following:
+		// 1) Whether currently nothing is being done or corrected
+		// 2) Whether two consecutive measuring points show a large enough slope that can
+		//    be identified with an upstroke
+		// 3) Whether lognum APs were already recorded before
+		// 4) Whether the mesured voltage is above a voltage treshold
+
+		count = 0; // Reset the correction counter
+		act = 1; // Switch the correction on
 	}
 
-	
+	// *************************************************
+	// *************************************************
+	// ** Computing AP correction and outputting this **
+	// *************************************************
+	// *************************************************
 	if (act == 1)
 	{
-		Iout = Cm * (1/Rm) * (Vm - ideal_AP[count]);
-		output(0) = -Iout * 2.5e-3; // This is equal to Vout
-		Vm_diff_log[count] = Vm - ideal_AP[count];
+		// This statement is entered whenever the instruction to correct the AP has
+		// been given.
 
-		iAP = ideal_AP[count];
-		output(1) = iAP;
+		Iout = Cm * (1/Rm) * (Vm - ideal_AP[count]); 	// Calculate the outward going current as
+														// a value proportional to capacitance,
+														// conductivity (1/resistance), and the error
+		output(0) = -Iout * 2.5e-3; 	// This is equal to Vout
+										// The factor 2.5e-3 comes from the conversion between current
+										// and voltage that is associated to the external command
+										// sensitivity of the Multiclamp 700B patch-clamp amplifier,
+										// which is 400 pA/V to be precise
+		Vm_diff_log[count] = Vm - ideal_AP[count]; // Log the errors
 	}
 
+	// **************************************
+	// **************************************
+	// ** Updating the necessary variables **
+	// **************************************
+	// **************************************
 	if(corr == 1 && act == 1 && count > 1 && abs(Vm_diff_log[count])>noise_tresh)
 	{
-		if((Vm_diff_log[count-1] / Vm_diff_log[count]) < 0) //they have the opposite sign, so an overshoot occured
+		// This statement is entered whenever an update is needed in the resistance.
+		// The if conditions measure the following:
+		// 1) Whether correction adaptation is on
+		// 2) Whether currently there is correction going on
+		// 3) whether we are not in the very first step (gives errors)
+		// 4) whether the current error is larger than the noise threshold
+
+		if((Vm_diff_log[count-1] / Vm_diff_log[count]) < 0)
 		{
-			Rm = Rm * Rm_corr_up;
+			// This statement is entered whenever two consecutive error values have
+			// an opposite sign. This means that an overshoot in correction occurred.
+			// Therefore Iout should become less, and hence Rm should be increased. 
+
+			Rm = Rm * Rm_corr_up; // Increase the resistance
 		}
-		if(abs(Vm_diff_log[count-1]) < abs(Vm_diff_log[count]) && (Vm_diff_log[count-1] / Vm_diff_log[count]) > 0) //the difference is getting larger, so increase current
+		if(abs(Vm_diff_log[count-1]) < abs(Vm_diff_log[count]) && (Vm_diff_log[count-1] / Vm_diff_log[count]) > 0)
 		{
-			Rm = Rm / Rm_corr_down;
+			// This statement is entered whenever two consecutive error values have
+			// the same sign, and when the error values increase in value. This means
+			// that the error is increasing. Hence we need to correct stronger and Iout
+			// should increase. As a consequence the resistance Rm should be decreased.
+
+			Rm = Rm / Rm_corr_down; // Decrease the resistance
 		}
 	}
-
 
 	if (count > BCL_cutoff*BCL)
 	{
-		act = 0;
-		output(0) = 0;
+		// This statement is entered whenever the end of an AP is reached.
+		// The if condition measures the following:
+		// 1) Whether the current AP is further than a chosen cutoff of the pre-determined basic cycle length
+
+		act = 0; // Stop correcting during the last phase of the AP (is RMP)
+		output(0) = 0; // Send a 0 output since the last output is otherwise kept
 	}
 
-	count++;
-
-	count_r = (double)count/1000.0;
-	count2_r = (double)count2/1000.0;
-
+	count++; // End of the real-time loop, adjust the counter
 }
 
 /*
 Update
 ------
-ABC
+This function updates the parameters of the code depending on the flag that is 
+given to it, where each flag is associated to a button.
+INIT: associated to the loading of the module
+MODIFY: associated to the Modify button
+PERIOD: associated to the period linker with the "system control panel" module
+PAUSE: associate to the pause button when pressing on it
+UNPAUSE: associated to the pause button when unpressing it
 
 IN:
 	*) flag				Indicating the state of the update:
@@ -276,12 +363,8 @@ void gAPqr7::update(DefaultGUIModel::update_flags_t flag)
 		setState("APs2", APs);
 		setState("log_ideal_on2", log_ideal_on);
 		setState("BCL2", BCL);
-		setState("enter2", enter);
 		setState("Rm2 (MOhm)", Rm);
 		setState("act2", act);
-		setState("count", count_r);
-		setState("count2", count2_r);
-		setState("modulo_state", modulo);
 		break;
 	case MODIFY:
 		Cm = getParameter("Cm (pF)").toDouble();
@@ -344,7 +427,6 @@ void gAPqr7::initParameters()
 	systime = 0;
 	count = 0;
 	act = 0;
-	iAP=0;
 	Rm_corr_up=8;
 	Rm_corr_down=2;
 	noise_tresh = 0.5; 	// mV
@@ -356,7 +438,5 @@ void gAPqr7::initParameters()
 	enter = 0;
 	log_ideal_on = 0;
 	lognum = 3;
-	count_r = 0;
-	count2_r = 0;
 	modulo = (1.0/(RT::System::getInstance()->getPeriod() * 1e-6)) * 1000.0;
 }
