@@ -1,5 +1,5 @@
 /*
- Copyright (C) 2011 Georgia Institute of Technology
+ Copyright (C) 2022 Leiden University Medical Center
 
  This program is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by

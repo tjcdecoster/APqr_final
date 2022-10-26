@@ -1,5 +1,5 @@
 /*
- Copyright (C) 2011 Georgia Institute of Technology
+ Copyright (C) 2022 Leiden University Medical Center
 
  This program is free software: you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
@@ -14,30 +14,78 @@
  You should have received a copy of the GNU General Public License
  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
- */
-
-/*
-  This version logs 3 APs then starts to correct the 4th AP and onwards. Uses current injection.
-
- */
+*/
 
 #include <APqr7.h>
 #include <math.h>
 #include <vector>
 
+/*
+ *********
+ * APqr7 *
+ *********
+
+This software provides an Action Potential Cure (APqr) to correct divergent
+membrane potentials in excitable biological systems. The first X action
+potentials are logged when the software starts, after which AP correction
+starts from the (X+1)-st AP onwards. This correction occurs with the use of
+dynamic pacth-clamp currrent injection.
+
+IN:
+	*) Cm				Capacitance of the cell
+	*) V_cutoff			Threshold potential for the detection of the beginning
+						of an AP
+	*) Slope_tresh		Slope threshold that defines the beginning of the
+						AP (mV/ms)
+	*) BCL_cutoff		Threshold value for the end of an AP, given as a
+						percentage of the total APD
+	*) lognum			Number of APs that need to be logged as a reference
+	*) Rm				Initial resistance
+	*) Rm_corr_up		Factor to increase Rm with when necessary
+	*) Rm_corr_down		Factor to decrease Rm with when necessary
+	*) noise_tresh		The noise level that is allowed around the ideal value
+						before correcting
+OUT:
+	*) Vout 			voltage that is used to inject the calculated amount
+						of current into the excitable system
+*/
+
+/*
+createRTXIPlugin
+----------------
+Creation of a new RTXI Plugin
+
+IN:
+	*) None
+OUT:
+	*) RTXIPlugin
+*/
 extern "C" Plugin::Object *createRTXIPlugin(void)
 {
 	return new gAPqr7();
 }
 
+/*
+vars[]
+----
+This is not a function, but rather the construction of a list. This list contains
+all the variables that are visible and/or modifiable in the GUI of the software
+module. There is the choice between INPUT, OUTPUT, PARAMETER and STATE.
+
+INPUT: connected to the input port
+OUTPUT: connected to the output port
+PARAMETER: modifiable variable in the code
+STATE: non-modifiable variable in the code
+*/
 static DefaultGUIModel::variable_t vars[] = {
 	{ "Vm (mV)", "Membrane potential (mV)", DefaultGUIModel::INPUT, },
 	{ "Iout (pA)", "Output current (pA)", DefaultGUIModel::OUTPUT, },
 	{ "iAP", "ideal AP", DefaultGUIModel::OUTPUT, },
 	{ "Cm (pF)", "pF", DefaultGUIModel::PARAMETER
 	| DefaultGUIModel::DOUBLE, },
-	{ "V_cutoff (mV)", "Threshold potential for the detection of the beginning of an AP, together with Slope_thresh", 		DefaultGUIModel::PARAMETER | DefaultGUIModel::DOUBLE, },
-	{ "Slope_thresh (mV/ms)", "SLope threshold that defines the beginning of the AP (mV/ms)",
+	{ "V_cutoff (mV)", "Threshold potential for the detection of the beginning of an AP, together with Slope_thresh",
+	DefaultGUIModel::PARAMETER | DefaultGUIModel::DOUBLE, },
+	{ "Slope_thresh (mV/ms)", "Slope threshold that defines the beginning of the AP (mV/ms)",
 	DefaultGUIModel::PARAMETER | DefaultGUIModel::DOUBLE, },
 	{ "BCL_cutoff (pct)", "Threshold value for the end of an AP, given as a percentage of the total APD",
 	DefaultGUIModel::PARAMETER | DefaultGUIModel::DOUBLE, },
@@ -68,8 +116,22 @@ static DefaultGUIModel::variable_t vars[] = {
 	{ "modulo_state", "number", DefaultGUIModel::STATE, },
 };
 
+/*
+num_vars
+--------
+
+*/
 static size_t num_vars = sizeof(vars) / sizeof(DefaultGUIModel::variable_t);
 
+/*
+gAPqr7
+------
+
+IN:
+	*)
+OUT:
+	*)
+*/
 gAPqr7::gAPqr7(void) : DefaultGUIModel("APqr7", ::vars, ::num_vars)
 {
 	setWhatsThis(
@@ -81,20 +143,36 @@ gAPqr7::gAPqr7(void) : DefaultGUIModel("APqr7", ::vars, ::num_vars)
 	resizeMe();
 }
 
-gAPqr7::~gAPqr7(void)
-{
-}
+gAPqr7::~gAPqr7(void) {}
 
+/*
+cleanup
+-------
+
+IN:
+	*) None
+OUT:
+	*) None
+*/
 void gAPqr7::cleanup()
 {
 	for(i=0;i<10000;i++){
 		Vm_log[i]=0;
 		Vm_diff_log[i]=0;
 		ideal_AP[i]=0;
-		
 	}
 }
 
+/*
+execute
+-------
+
+IN:
+	*) None
+OUT:
+	*) Vout				voltage that is used to inject the calculated amount
+						of current into the excitable system
+*/
 void gAPqr7::execute(void)
 {
 	systime = count * period; // time in milli-seconds
@@ -132,7 +210,7 @@ void gAPqr7::execute(void)
 	if (act == 1)
 	{
 		Iout = Cm * (1/Rm) * (Vm - ideal_AP[count]);
-		output(0) = -Iout * 2.5e-3;
+		output(0) = -Iout * 2.5e-3; // This is equal to Vout
 		Vm_diff_log[count] = Vm - ideal_AP[count];
 
 		iAP = ideal_AP[count];
@@ -165,6 +243,17 @@ void gAPqr7::execute(void)
 
 }
 
+/*
+Update
+------
+ABC
+
+IN:
+	*) flag				Indicating the state of the update:
+						INIT, MODIFY, PERIOD, PAUSE, UNPAUSE
+OUT:
+	*) None
+*/
 void gAPqr7::update(DefaultGUIModel::update_flags_t flag)
 {
 	switch (flag)
@@ -231,14 +320,25 @@ void gAPqr7::update(DefaultGUIModel::update_flags_t flag)
 	}
 }
 
+/*
+initParameters
+--------------
+This function sets all values to their defaults when no external parameters are provided
+through the GUI interface.
+
+IN:
+	*) None
+OUT:
+	*) None
+*/
 void gAPqr7::initParameters()
 {
-	Vm = -80; // mV
-	Cm = 150; // pF
-	Rm = 150; // MOhm
+	Vm = -80; 			// mV
+	Cm = 150; 			// pF
+	Rm = 150; 			// MOhm
 	slope_thresh = 5.0; // mV
 	corr = 1;
-	Iout = 0;
+	Iout = 0;			// pA
 	output(0) = -Iout * 0.5e-3;
 	period = RT::System::getInstance()->getPeriod() * 1e-6; // ms
 	systime = 0;
@@ -247,11 +347,11 @@ void gAPqr7::initParameters()
 	iAP=0;
 	Rm_corr_up=8;
 	Rm_corr_down=2;
-	noise_tresh = 0.5; // mV
-	BCL = 0;
+	noise_tresh = 0.5; 	// mV
+	BCL = 0;			// ms
 	count2 = 0;
 	APs = -1;
-	V_cutoff = -40;
+	V_cutoff = -40;		// mV
 	BCL_cutoff = 0.98;
 	enter = 0;
 	log_ideal_on = 0;
