@@ -100,15 +100,11 @@ static DefaultGUIModel::variable_t vars[] = {
 	| DefaultGUIModel::DOUBLE, }, 
 	{ "Correction (0 or 1)", "Switch Rm correction off (0) or on (1)",
 	DefaultGUIModel::PARAMETER | DefaultGUIModel::DOUBLE, },
-	{ "Vm2 (mV)", "Membrane potential (mV)", DefaultGUIModel::STATE, },
-	{ "Iout2 (pA)", "Output Current (pA)", DefaultGUIModel::STATE, },
-	{ "Period (ms)", "Period (ms)", DefaultGUIModel::STATE, }, 
-	{ "Time (ms)", "Time (ms)", DefaultGUIModel::STATE, },
-	{ "APs2", "APs", DefaultGUIModel::STATE, },
-	{ "log_ideal_on2", "log_ideal_on", DefaultGUIModel::STATE, },
-	{ "BCL2", "BCL", DefaultGUIModel::STATE, },
-	{ "Rm2 (MOhm)", "MOhm", DefaultGUIModel::STATE, },
-	{ "act2", "0 or 1", DefaultGUIModel::STATE, },
+	{ "Period (ms)", "Period (ms)", DefaultGUIModel::STATE, }, // To check that the period taken by the algorithm is the same as the one i nthe control panel module
+	{ "Time (ms)", "Time (ms)", DefaultGUIModel::STATE, }, // To check that the algorithm is running
+	{ "APs2", "APs", DefaultGUIModel::STATE, }, // To check whether APs are being logged and the counter increases
+	{ "BCL2", "BCL", DefaultGUIModel::STATE, }, // To check what the eventual BCL of the ideal AP has become. You can see then if the APs were logged correctly
+	{ "act2", "0 or 1", DefaultGUIModel::STATE, }, // Switches from 0 to 1 and back continuously as a check to see whether you are computing error values and corrected values
 };
 
 /*
@@ -356,14 +352,10 @@ void gAPqr7::update(DefaultGUIModel::update_flags_t flag)
 		setParameter("BCL_cutoff (pct)", BCL_cutoff);
 		setParameter("Slope_thresh (mV/ms)", slope_thresh);
 		setParameter("Correction (0 or 1)", corr);
-		setState("Vm2 (mV)", Vm);
-		setState("Iout2 (pA)", Iout);
 		setState("Time (ms)", systime);
 		setState("Period (ms)", period);
 		setState("APs2", APs);
-		setState("log_ideal_on2", log_ideal_on);
 		setState("BCL2", BCL);
-		setState("Rm2 (MOhm)", Rm);
 		setState("act2", act);
 		break;
 	case MODIFY:
