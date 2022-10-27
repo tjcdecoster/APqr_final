@@ -229,6 +229,7 @@ void gAPqr7::execute(void)
 		// The if conditions measure the following:
 		// 1) Whether less than lognum APs were recorded
 		// 2) Whether the AP should be logged
+		
 		ideal_AP[count2] = (ideal_AP[count2]*APs + Vm)/(APs+1); // Rolling average of the AP values
 		count2++; // Increasing the logging counter
 	}

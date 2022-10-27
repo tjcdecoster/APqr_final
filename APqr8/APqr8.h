@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 
+// All parameters and functions related to the gAPqr8 class.
 class gAPqr8 : public DefaultGUIModel
 {
 

@@ -25,11 +25,63 @@
 #include <math.h>
 #include <vector>
 
+/*
+ *********
+ * APqr8 *
+ *********
+
+This software provides an Action Potential Cure (APqr) to correct divergent
+membrane potentials in excitable biological systems. The first X action
+potentials are logged when the software starts, after which AP correction
+starts from the (X+1)-st AP onwards. This correction occurs with the use of
+LED-controlled illumination on optogenetically modified cells.
+
+IN:
+	*) Cm				Capacitance of the cell
+	*) V_cutoff			Threshold potential for the detection of the beginning
+						of an AP
+	*) Slope_tresh		Slope threshold that defines the beginning of the
+						AP (mV/ms)
+	*) BCL_cutoff		Threshold value for the end of an AP, given as a
+						percentage of the total APD
+	*) lognum			Number of APs that need to be logged as a reference
+	*) Rm				Initial resistance
+	*) Rm_corr_up		Factor to increase Rm with when necessary
+	*) Rm_corr_down		Factor to decrease Rm with when necessary
+	*) noise_tresh		The noise level that is allowed around the ideal value
+						before correcting
+OUT:
+	*) Vout 			voltage that is used to inject the calculated amount
+						of current into the excitable system
+*/
+
+/*
+createRTXIPlugin
+----------------
+Creation of a new RTXI Plugin
+
+IN:
+	*) None
+OUT:
+	*) RTXIPlugin
+*/
 extern "C" Plugin::Object *createRTXIPlugin(void)
 {
 	return new gAPqr8();
 }
 
+/*
+vars[]
+----
+This is not a function, but rather the construction of a list. This list contains
+all the variables that are visible and/or modifiable in the GUI of the software
+module. There is the choice between INPUT, OUTPUT, PARAMETER and STATE.
+
+INPUT: connected to the input port
+OUTPUT: connected to the output port
+PARAMETER: modifiable variable in the code
+STATE: non-modifiable variable in the code
+*/
 static DefaultGUIModel::variable_t vars[] = {
 	{ "Vm (mV)", "Membrane potential (mV)", DefaultGUIModel::INPUT, },
 	{ "Iout (pA)", "Output current (pA)", DefaultGUIModel::OUTPUT, },
@@ -68,8 +120,25 @@ static DefaultGUIModel::variable_t vars[] = {
 	{ "modulo_state", "number", DefaultGUIModel::STATE, },
 };
 
+/*
+num_vars
+--------
+variable denoting the amount of variables that is displayed in the GUI
+*/
 static size_t num_vars = sizeof(vars) / sizeof(DefaultGUIModel::variable_t);
 
+/*
+gAPqr8
+------
+This function constructs the actual GUI by basing itself on the Default GUI Model.
+It creates a module with a name, initializes the GUI, initializes the parameters,
+adds a refresh, and allows you to resize.
+
+IN:
+	*) None
+OUT:
+	*) None
+*/
 gAPqr8::gAPqr8(void) : DefaultGUIModel("APqr8", ::vars, ::num_vars)
 {
 	setWhatsThis(
@@ -81,54 +150,128 @@ gAPqr8::gAPqr8(void) : DefaultGUIModel("APqr8", ::vars, ::num_vars)
 	resizeMe();
 }
 
-gAPqr8::~gAPqr8(void)
-{
-}
+gAPqr8::~gAPqr8(void){}
 
+/*
+cleanup
+-------
+The APqr software makes use of three list structures which need cleaning after
+a reset of parameters. The cleanup function takes care of this.
+
+IN:
+	*) None
+OUT:
+	*) None
+*/
 void gAPqr8::cleanup()
 {
 	for(i=0;i<10000;i++){
 		Vm_log[i]=0;
 		Vm_diff_log[i]=0;
 		ideal_AP[i]=0;
-		
 	}
 }
 
+/*
+execute
+-------
+This is the main funtcion of the code that is looped through real-time.
+It contains the four main parts of the algorithm:
+	1) Recording the ideal AP
+	2) Detecting AP upstrokes
+	3) Computing AP correction and outputting this
+	4) Updating the necessary variables
+
+IN:
+	*) None
+OUT:
+	*) Vout				voltage that is used to inject the calculated amount
+						of current into the excitable system
+*/
 void gAPqr8::execute(void)
 {
-	systime = count * period; // time in milli-seconds
-	Vm = input(0) * 1e2; // convert 10V to mV. Divided by 10 because the amplifier produces 10-fold amplified voltages. Multiplied by 1000 to convert V to mV.
+	systime = count * period;	// time in milli-seconds
+	Vm = input(0) * 1e2;		// convert 10V to mV. Divided by 10 because
+								// the amplifier produces 10-fold amplified
+								// voltages. Multiplied by 1000 to convert
+								// V to mV.
 
-	Vm_log[count % (int)modulo] = Vm;
+	Vm_log[count % (int)modulo] = Vm;	// Logging the measured Vm in a list
+										// where the modulo component makes
+										// sure you keep cycling when you have
+										// reached the maximum number in the list.
 
+	// ****************************
+	// ****************************
+	// ** Recording the ideal AP **
+	// ****************************
+	// ****************************
 	if(count>(int)(1/period)-1 && (Vm - Vm_log[(count-(int)(1/period)) % (int)modulo]) >= slope_thresh && APs<lognum && enter == 0 && Vm > V_cutoff)
 	{
-		BCL = (APs==-1? 0: (BCL*APs + count2)/(APs+1));
-		log_ideal_on = 1;
-		count2 = 0;
-		enter = 1;
-		APs++;
+		// This statement is entered whenever an upstroke is detected and the amount of
+		// recorded APs is smaller than lognum.
+		// The if conditions measure the following:
+		// 1) Whether you are far enough in the recording such that you don't accidentaly
+		//    start in an ongoing AP
+		// 2) Whether two consecutive measuring points show a large enough slope that can
+		//    be identified with an upstroke
+		// 3) Whether less than lognum APs were recorded
+		// 4) Whether you are currently not in an action potential
+		// 5) Whether the mesured voltage is above a voltage treshold
+
+		BCL = (APs==-1? 0: (BCL*APs + count2)/(APs+1)); // Rolling average of the basic cycle length
+		log_ideal_on = 1; // Switches on logging the AP
+		count2 = 0; // Resets the logging counter
+		enter = 1; // Switches on the indicator that an AP has started
+		APs++; // Counts the AP upstrokes that have passed
 	}
 
 	if((Vm - Vm_log[(count-(int)(1/period)) % (int)modulo]) < 0 && enter == 1)
 	{
-		enter = 0;
+		// This statement is entered whenever the upstroke phase of an AP is over.
+		// The if conditions measure the following:
+		// 1) Whether two consecutive measuring points show a negative slope
+		// 2) Whether you currently are in an ongoing AP
+
+		enter = 0; // Switches off the indicator that an AP has started
 	}
 
 	if(APs<lognum && log_ideal_on == 1)
 	{
-		ideal_AP[count2] = (ideal_AP[count2]*APs + Vm)/(APs+1);
-		count2++;
+		// This statement is entered whenever logging of the AP is on
+		// The if conditions measure the following:
+		// 1) Whether less than lognum APs were recorded
+		// 2) Whether the AP should be logged
+
+		ideal_AP[count2] = (ideal_AP[count2]*APs + Vm)/(APs+1); // Rolling average of the AP values
+		count2++; // Increasing the logging counter
 	}
 
+	// ****************************
+	// ****************************
+	// ** Detecting AP upstrokes **
+	// ****************************
+	// ****************************
 	if (act == 0 && (Vm - Vm_log[(count-(int)(1/period)) % (int)modulo]) >= slope_thresh && APs >= lognum && Vm > V_cutoff)
 	{
-		count = 0;		
-		act = 1;
+		// This statement is entered whenever an upstroke is detected after the
+		// ideal APs have been recorded.
+		// The if conditions measure the following:
+		// 1) Whether currently nothing is being done or corrected
+		// 2) Whether two consecutive measuring points show a large enough slope that can
+		//    be identified with an upstroke
+		// 3) Whether lognum APs were already recorded before
+		// 4) Whether the mesured voltage is above a voltage treshold
+
+		count = 0; // Reset the correction counter
+		act = 1; // Switch the correction on
 	}
 
-	
+	// *************************************************
+	// *************************************************
+	// ** Computing AP correction and outputting this **
+	// *************************************************
+	// *************************************************	
 	if (act == 1)
 	{
 		Iout = Cm * (1/Rm) * (Vm - ideal_AP[count]);
@@ -168,6 +311,23 @@ void gAPqr8::execute(void)
 
 }
 
+/*
+Update
+------
+This function updates the parameters of the code depending on the flag that is 
+given to it, where each flag is associated to a button.
+INIT: associated to the loading of the module
+MODIFY: associated to the Modify button
+PERIOD: associated to the period linker with the "system control panel" module
+PAUSE: associate to the pause button when pressing on it
+UNPAUSE: associated to the pause button when unpressing it
+
+IN:
+	*) flag				Indicating the state of the update:
+						INIT, MODIFY, PERIOD, PAUSE, UNPAUSE
+OUT:
+	*) None
+*/
 void gAPqr8::update(DefaultGUIModel::update_flags_t flag)
 {
 	switch (flag)
@@ -234,6 +394,17 @@ void gAPqr8::update(DefaultGUIModel::update_flags_t flag)
 	}
 }
 
+/*
+initParameters
+--------------
+This function sets all values to their defaults when no external parameters are provided
+through the GUI interface.
+
+IN:
+	*) None
+OUT:
+	*) None
+*/
 void gAPqr8::initParameters()
 {
 	Vm = -80; // mV
