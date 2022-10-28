@@ -41,7 +41,6 @@ starts from the (X+1)-st AP onwards. This correction occurs with the use of
 LED-controlled illumination on optogenetically modified cells.
 
 IN:
-	*) Cm				Capacitance of the cell
 	*) V_cutoff			Threshold potential for the detection of the beginning
 						of an AP
 	*) Slope_tresh		Slope threshold that defines the beginning of the
@@ -49,14 +48,26 @@ IN:
 	*) BCL_cutoff		Threshold value for the end of an AP, given as a
 						percentage of the total APD
 	*) lognum			Number of APs that need to be logged as a reference
-	*) Rm				Initial resistance
-	*) Rm_corr_up		Factor to increase Rm with when necessary
-	*) Rm_corr_down		Factor to decrease Rm with when necessary
-	*) noise_tresh		The noise level that is allowed around the ideal value
-						before correcting
+	*) Rm_blue			Initial resistance for the blue LED channel
+	*) Rm_red			Initial resistance for the red LED channel
+	*) corr_start		Gives the possibility to start at a later time than
+						the lognum+1-st AP with correcting the AP
+	*) Blue_Vrev		Apparent reversal potential of the 'blue' ChR current
+	*) K_p				Scale factor for the proportional part of the PID
+	*) K_i				Scale factor for the integral part of the PID
+	*) K_d				Scale factor for the derivative part of the PID
+	*) length			Amount of points that need to be taken into account to
+						find the derivative (slope of the linear trend line of
+						these points)
+	*) PID_tresh		treshold value under which the same output as before
+						gets repeated
+	*) min_PID			value under which the lights get switched off
+	*) reset_I_on		value that indicates whether or not to reset I at RMP
 OUT:
-	*) Vout 			voltage that is used to inject the calculated amount
-						of current into the excitable system
+	*) VLED1 			voltage that is used to power the first LED driver that
+						regulates the light that is shined onto the cells
+	*) VLED2 			voltage that is used to power the second LED driver that
+						regulates the light that is shined onto the cells
 */
 
 /*
