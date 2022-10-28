@@ -16,11 +16,6 @@
 
  */
 
-/*
- This version logs 3 APs and starts correcting the 4th AP and onwards, using an LED light source connected to output(0), if the AP becomes longer then the average of the 3 that has been recorded.
-
- */
-
 #include <APqr8.h>
 #include <math.h>
 #include <vector>
@@ -85,7 +80,6 @@ STATE: non-modifiable variable in the code
 static DefaultGUIModel::variable_t vars[] = {
 	{ "Vm (mV)", "Membrane potential (mV)", DefaultGUIModel::INPUT, },
 	{ "Iout (pA)", "Output current (pA)", DefaultGUIModel::OUTPUT, },
-	{ "iAP", "ideal AP", DefaultGUIModel::OUTPUT, },
 	{ "Cm (pF)", "pF", DefaultGUIModel::PARAMETER
 	| DefaultGUIModel::DOUBLE, },
 	{ "V_cutoff (mV)", "Threshold potential for the detection of the beginning of an AP, together with Slope_thresh", 		DefaultGUIModel::PARAMETER | DefaultGUIModel::DOUBLE, },
@@ -105,19 +99,11 @@ static DefaultGUIModel::variable_t vars[] = {
 	| DefaultGUIModel::DOUBLE, }, 
 	{ "Correction (0 or 1)", "Switch Rm correction off (0) or on (1)",
 	DefaultGUIModel::PARAMETER | DefaultGUIModel::DOUBLE, },
-	{ "Vm2 (mV)", "Membrane potential (mV)", DefaultGUIModel::STATE, },
-	{ "Iout2 (pA)", "Output Current (pA)", DefaultGUIModel::STATE, },
-	{ "Period (ms)", "Period (ms)", DefaultGUIModel::STATE, }, 
-	{ "Time (ms)", "Time (ms)", DefaultGUIModel::STATE, },
-	{ "APs2", "APs", DefaultGUIModel::STATE, },
-	{ "log_ideal_on2", "log_ideal_on", DefaultGUIModel::STATE, },
-	{ "BCL2", "BCL", DefaultGUIModel::STATE, },
-	{ "enter2", "enter", DefaultGUIModel::STATE, },
-	{ "Rm2 (MOhm)", "MOhm", DefaultGUIModel::STATE, },
-	{ "act2", "0 or 1", DefaultGUIModel::STATE, },
-	{ "count", "number", DefaultGUIModel::STATE, },
-	{ "count2", "number", DefaultGUIModel::STATE, },
-	{ "modulo_state", "number", DefaultGUIModel::STATE, },
+	{ "Period (ms)", "Period (ms)", DefaultGUIModel::STATE, }, // To check that the period taken by the algorithm is the same as the one i nthe control panel module
+	{ "Time (ms)", "Time (ms)", DefaultGUIModel::STATE, }, // To check that the algorithm is running
+	{ "APs2", "APs", DefaultGUIModel::STATE, }, // To check whether APs are being logged and the counter increases
+	{ "BCL2", "BCL", DefaultGUIModel::STATE, }, // To check what the eventual BCL of the ideal AP has become. You can see then if the APs were logged correctly
+	{ "act2", "0 or 1", DefaultGUIModel::STATE, }, // Switches from 0 to 1 and back continuously as a check to see whether you are computing error values and corrected values
 };
 
 /*
@@ -274,41 +260,67 @@ void gAPqr8::execute(void)
 	// *************************************************	
 	if (act == 1)
 	{
-		Iout = Cm * (1/Rm) * (Vm - ideal_AP[count]);
-		if (Iout < 0){Iout = 0;}
-		if (Iout > 5){Iout = 5;}		
+		// This statement is entered whenever the instruction to correct the AP has
+		// been given.
+		
+		Iout = Cm * (1/Rm) * (Vm - ideal_AP[count]); 	// Calculate the outward going current as
+														// a value proportional to capacitance,
+														// conductivity (1/resistance), and the error
+		if (Iout < 0){Iout = 0;} 	// Set the ouput to 0 whenever you cannot correct in the direction
+									// the channelrhodopsin pushes the membrane potential
+		if (Iout > 5){Iout = 5;} // The maximal LED driver output is 5V
 
-		output(0) = Iout;
-		Vm_diff_log[count] = Vm - ideal_AP[count];
-
-		iAP = ideal_AP[count]/1000;
-		output(1) = iAP;
+		output(0) = Iout; // This is equal to Vout and will drive the LED
+		Vm_diff_log[count] = Vm - ideal_AP[count]; // Log the errors
 	}
 
+	// **************************************
+	// **************************************
+	// ** Updating the necessary variables **
+	// **************************************
+	// **************************************
 	if(corr == 1 && act == 1 && count > 1 && abs(Vm_diff_log[count])>noise_tresh)
 	{
-		if((Vm_diff_log[count-1] / Vm_diff_log[count]) < 0) //they have the opposite sign, so an overshoot occured
+		// This statement is entered whenever an update is needed in the resistance.
+		// The if conditions measure the following:
+		// 1) Whether correction adaptation is on
+		// 2) Whether currently there is correction going on
+		// 3) whether we are not in the very first step (gives errors)
+		// 4) whether the current error is larger than the noise threshold
+
+		if((Vm_diff_log[count-1] / Vm_diff_log[count]) < 0)
 		{
-			Rm = Rm * Rm_corr_up;
+			// This statement is entered whenever two consecutive error values have
+			// an opposite sign. This means that an overshoot in correction occurred.
+			// Therefore Iout should become less, and hence Rm should be increased. 
+
+			Rm = Rm * Rm_corr_up; // Increase the resistance
 		}
-		if(abs(Vm_diff_log[count-1]) < abs(Vm_diff_log[count]) && (Vm_diff_log[count-1] / Vm_diff_log[count]) > 0) //the difference is getting larger, so increase current
+		if(abs(Vm_diff_log[count-1]) < abs(Vm_diff_log[count]) && (Vm_diff_log[count-1] / Vm_diff_log[count]) > 0 && Rm >= 0.01*Rm_corr_down)
 		{
-			Rm = Rm / Rm_corr_down;
+			// This statement is entered whenever two consecutive error values have
+			// the same sign, and when the error values increase in value. This means
+			// that the error is increasing. Hence we need to correct stronger and Iout
+			// should increase. As a consequence the resistance Rm should be decreased.
+			// However, a lower bounds is put on Rm to prevent the updated Rm value from
+			// reaching infinity.
+
+			Rm = Rm / Rm_corr_down; // Decrease the resistance
 		}
 	}
 
 
 	if (count > BCL_cutoff*BCL)
 	{
-		act = 0;
-		output(0) = 0;
+		// This statement is entered whenever the end of an AP is reached.
+		// The if condition measures the following:
+		// 1) Whether the current AP is further than a chosen cutoff of the pre-determined basic cycle length
+
+		act = 0; // Stop correcting during the last phase of the AP (is RMP)
+		output(0) = 0; // Send a 0 output since the last output is otherwise kept
 	}
 
-	count++;
-
-	count_r = (double)count/1000.0;
-	count2_r = (double)count2/1000.0;
-
+	count++; // End of the real-time loop, adjust the counter
 }
 
 /*
@@ -343,19 +355,11 @@ void gAPqr8::update(DefaultGUIModel::update_flags_t flag)
 		setParameter("BCL_cutoff (pct)", BCL_cutoff);
 		setParameter("Slope_thresh (mV/ms)", slope_thresh);
 		setParameter("Correction (0 or 1)", corr);
-		setState("Vm2 (mV)", Vm);
-		setState("Iout2 (pA)", Iout);
 		setState("Time (ms)", systime);
 		setState("Period (ms)", period);
 		setState("APs2", APs);
-		setState("log_ideal_on2", log_ideal_on);
 		setState("BCL2", BCL);
-		setState("enter2", enter);
-		setState("Rm2 (MOhm)", Rm);
 		setState("act2", act);
-		setState("count", count_r);
-		setState("count2", count2_r);
-		setState("modulo_state", modulo);
 		break;
 	case MODIFY:
 		Cm = getParameter("Cm (pF)").toDouble();
@@ -418,7 +422,6 @@ void gAPqr8::initParameters()
 	systime = 0;
 	count = 0;
 	act = 0;
-	iAP=0;
 	Rm_corr_up=2;
 	Rm_corr_down=2;
 	noise_tresh = 2; // mV
@@ -430,7 +433,5 @@ void gAPqr8::initParameters()
 	enter = 0;
 	log_ideal_on = 0;
 	lognum = 3;
-	count_r = 0;
-	count2_r = 0;
 	modulo = (1.0/(RT::System::getInstance()->getPeriod() * 1e-6)) * 1000.0;
 }

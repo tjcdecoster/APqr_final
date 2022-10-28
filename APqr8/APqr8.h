@@ -35,35 +35,41 @@ class gAPqr8 : public DefaultGUIModel
 		virtual void update(DefaultGUIModel::update_flags_t);
 		
 	private:
+		// functions
 		void cleanup();
+		int i;
 		void initParameters();
-		double Vm;
-		double period;
-		double Cm;
-		double Rm;
-		double slope_thresh;
-		double Iout;
+		// system related parameters
 		double systime;
-		double count_r;
-		double count2_r;
-		long long count;
+		double period;
+		// arrays
 		double Vm_log[10000] = {0};		
 		double ideal_AP[10000] = {0};
+		double Vm_diff_log[10000] = {0};
+		// cell related parameters
+		double Vm;
+		double Cm;
+		double Rm;
+		// Upstroke related parameters
+		double slope_thresh;
+		double V_cutoff;
+		// logging parameters
+		double log_ideal_on;
+		double lognum;
+		double APs;
 		long long count2;
+		// correction parameters
+		double act;
+		int corr;
+		double noise_tresh;
+		double Rm_corr_up;
+		double Rm_corr_down;
+
+		// standard loop parameters
+		long long count;
 		double enter;
 		double BCL;
 		double BCL_cutoff;
-		double noise_tresh;
-		double V_cutoff;
-		double log_ideal_on;
-		double APs;
-		double act;
-		double Vm_diff_log[10000] = {0};
-		int corr;
-		double iAP;
-		double Rm_corr_up;
-		double Rm_corr_down;
-		double lognum;
 		double modulo;
-		int i;
+		double Iout;
 };

@@ -409,27 +409,34 @@ OUT:
 */
 void gAPqr7::initParameters()
 {
+	// system related parameters
+	systime = 0;
+	period = RT::System::getInstance()->getPeriod() * 1e-6; // ms
+	// cell related parameters
 	Vm = -80; 			// mV
 	Cm = 150; 			// pF
 	Rm = 150; 			// MOhm
+	// upstroke related parameters
 	slope_thresh = 5.0; // mV
-	corr = 1;
-	Iout = 0;			// pA
-	output(0) = -Iout * 0.5e-3;
-	period = RT::System::getInstance()->getPeriod() * 1e-6; // ms
-	systime = 0;
-	count = 0;
-	act = 0;
-	Rm_corr_up=8;
-	Rm_corr_down=2;
-	noise_tresh = 0.5; 	// mV
-	BCL = 0;			// ms
-	count2 = 0;
-	APs = -1;
 	V_cutoff = -40;		// mV
-	BCL_cutoff = 0.98;
-	enter = 0;
+	// logging parameters
 	log_ideal_on = 0;
 	lognum = 3;
+	APs = -1;
+	count2 = 0;
+	// correction parameters
+	act = 0;
+	corr = 1;
+	noise_tresh = 0.5; 	// mV
+	Rm_corr_up=8;
+	Rm_corr_down=2;
+
+	// standard loop parameters
+	count = 0;
+	enter = 0;
+	BCL = 0;			// ms
+	BCL_cutoff = 0.98;
 	modulo = (1.0/(RT::System::getInstance()->getPeriod() * 1e-6)) * 1000.0;
+	Iout = 0;			// pA
+	output(0) = -Iout * 0.5e-3;
 }

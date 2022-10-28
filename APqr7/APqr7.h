@@ -58,7 +58,6 @@ class gAPqr7 : public DefaultGUIModel
 		double lognum;
 		double APs;
 		long long count2;
-		double iAP;
 		// correction parameters
 		double act;
 		int corr;
