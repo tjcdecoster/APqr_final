@@ -16,29 +16,90 @@
 
 */
 
-
-/*
- Version history.
-
-	APqrPIDLTLP: a module based on APqrPID that now reads a iAP from a file. The code was written (Tim) using APqrPID as the core into which the necesary functions were copied from an APqrLTLP version to obtain file reading funcitonality.
-	APqrPIDLTLP2: same as above but now programmed (by Tim) the other way around, using an APqrLTLP version as a template and replacing the AP correction algorithm part by the one used in APqrPID.
-	APqrPIDLTLP3 (Tim): this one starts with pacing the cell using the blue channel and starts correction once an AP is successfully evoked.
-	APqrLTLP4: so far containes fixes (Balazs), including:
-		- the variable 'length' and 'dlength' were used inconsistently in v3, espceially in the sumy, sumx and sumx2 funcitons -> this is just esthetics, not a bug
-		- PID, PID_diff and Int get zeroed on 'Modify'. In case error accumulates too much during a bad recording.
-		- P, I and D terms are available as state variables
-		- Int is only calculated when Vm<blue_Vrev and VLED<5V		*/
-
 #include "APqrPIDLTLP4.h"
 #include <math.h>
 #include <time.h>
 #include <main_window.h>
 
+/*
+ ****************
+ * APqrPIDLTLP4 *
+ ****************
+
+This software provides an Action Potential Cure (APqr) to imprint
+membrane potentials in excitable biological systems. Values to be
+imprinted are read from ACSII file. The imprinting itself occurs
+with the use of LED-controlled illumination on optogenetically
+modified cells.
+
+IN:
+	*) V_cutoff			Threshold potential for the detection of the beginning
+						of an AP
+	*) Slope_tresh		Slope threshold that defines the beginning of the
+						AP (mV/ms)
+	*) BCL_cutoff		Threshold value for the end of an AP, given as a
+						percentage of the total APD
+	*) lognum			Number of APs that need to be logged as a reference
+	*) Rm_blue			Initial resistance for the blue LED channel
+	*) Rm_red			Initial resistance for the red LED channel
+	*) corr_start		Gives the possibility to start at a later time than
+						the lognum+1-st AP with correcting the AP
+	*) Blue_Vrev		Apparent reversal potential of the 'blue' ChR current
+	*) K_p				Scale factor for the proportional part of the PID
+	*) K_i				Scale factor for the integral part of the PID
+	*) K_d				Scale factor for the derivative part of the PID
+	*) length			Amount of points that need to be taken into account to
+						find the derivative (slope of the linear trend line of
+						these points)
+	*) PID_tresh		treshold value under which the same output as before
+						gets repeated
+	*) min_PID			value under which the lights get switched off
+	*) reset_I_on		value that indicates whether or not to reset I at RMP
+OUT:
+	*) VLED1 			voltage that is used to power the first LED driver that
+						regulates the light that is shined onto the cells
+	*) VLED2 			voltage that is used to power the second LED driver that
+						regulates the light that is shined onto the cells
+*/
+
+/*
+createRTXIPlugin
+----------------
+Creation of a new RTXI Plugin
+
+IN:
+	*) None
+OUT:
+	*) RTXIPlugin
+*/
+
+/*
+createRTXIPlugin
+----------------
+Creation of a new RTXI Plugin
+
+IN:
+	*) None
+OUT:
+	*) RTXIPlugin
+*/
 extern "C" Plugin::Object *createRTXIPlugin(void)
 {
 	return new APqrPIDLTLP4(); // Change the name of the plug-in here
 }
 
+/*
+vars[]
+----
+This is not a function, but rather the construction of a list. This list contains
+all the variables that are visible and/or modifiable in the GUI of the software
+module. There is the choice between INPUT, OUTPUT, PARAMETER and STATE.
+
+INPUT: connected to the input port
+OUTPUT: connected to the output port
+PARAMETER: modifiable variable in the code
+STATE: non-modifiable variable in the code
+*/
 static DefaultGUIModel::variable_t vars[] = {
 	{ "Loops", "Number of Times to Loop Data From File", DefaultGUIModel::PARAMETER
 	| DefaultGUIModel::UINTEGER, },
@@ -95,8 +156,25 @@ static DefaultGUIModel::variable_t vars[] = {
 	{ "iAP_V", "iAP_V", DefaultGUIModel::STATE, },
 };
 
+/*
+num_vars
+--------
+variable denoting the amount of variables that is displayed in the GUI
+*/
 static size_t num_vars = sizeof(vars) / sizeof(DefaultGUIModel::variable_t);
 
+/*
+gAPqrPIDLTLP4
+------
+This function constructs the actual GUI by basing itself on the Default GUI Model.
+It creates a module with a name, initializes the GUI, initializes the parameters,
+adds a refresh, and allows you to resize.
+
+IN:
+	*) None
+OUT:
+	*) None
+*/
 APqrPIDLTLP4::APqrPIDLTLP4(void) : DefaultGUIModel("APqr PIDLTLP4", ::vars, ::num_vars)
 {
 	setWhatsThis("This module loads data from an ASCII formatted file. It samples one value from the the file on every time step and creates and generates an output signal that powers an LED. This LED activates light-gated ion channels in cardiomyocytes with the aim of regulating their memrane potentials. The module computes the time length of the waveform based on the current real-time period.");
@@ -111,6 +189,17 @@ APqrPIDLTLP4::APqrPIDLTLP4(void) : DefaultGUIModel("APqr PIDLTLP4", ::vars, ::nu
 
 APqrPIDLTLP4::~APqrPIDLTLP4(void) {}
 
+/*
+cleanup
+-------
+The APqr software makes use of two list structures which need cleaning after
+a reset of parameters. The cleanup function takes care of this.
+
+IN:
+	*) None
+OUT:
+	*) None
+*/
 void APqrPIDLTLP4::cleanup()
 {
 	int i;
@@ -120,6 +209,20 @@ void APqrPIDLTLP4::cleanup()
 	}
 }
 
+/*
+sumy
+----
+Sum of X elements in an array.
+This function is used in the calculation of the derivative term.
+
+IN:
+	*) arr[]	Array with summable elements
+	*) n		index where you should end summing
+	*) length	total amount X of numbers to be summed
+	*) modulo	length of the array arr[]
+OUT:
+	*) sumy		The sum of 'length' elements in the array arr[]
+*/
 double APqrPIDLTLP4::sumy(double arr[], int n, double dlength, double modulo)
 {
     double sumy = 0; // initialize sum
@@ -132,6 +235,22 @@ double APqrPIDLTLP4::sumy(double arr[], int n, double dlength, double modulo)
     return sumy;
 }
 
+/*
+sumxy
+----
+Sum of X elements in an array multiplied by time/period.
+This function is used in the calculation of the derivative term.
+
+IN:
+	*) arr[]	Array with summable elements
+	*) n		index where you should end summing
+	*) length	total amount X of numbers to be summed
+	*) period	the length of a single time-step
+	*) modulo	length of the array arr[]
+OUT:
+	*) sumxy		The sum of 'length' elements in the array arr[] multiplied
+				by time-step
+*/
 double APqrPIDLTLP4::sumxy(double arr[], int n, double dlength, double period, double modulo)
 {
     double sumxy = 0; // initialize sum
@@ -148,6 +267,18 @@ double APqrPIDLTLP4::sumxy(double arr[], int n, double dlength, double period, d
     return sumxy;
 }
 
+/*
+sumx
+----
+Sum of X time-step elements.
+This function is used in the calculation of the derivative term.
+
+IN:
+	*) period	the length of a single time-step
+	*) length	total amount X of numbers to be summed
+OUT:
+	*) sumx		The sum of 'length' time-steps
+*/
 double APqrPIDLTLP4::sumx(double period, double dlength)
 {
 	double sumx = 0;
@@ -158,6 +289,18 @@ double APqrPIDLTLP4::sumx(double period, double dlength)
 	return sumx;
 }
 
+/*
+sumx2
+----
+Sum of X squared time-step elements.
+This function is used in the calculation of the derivative term.
+
+IN:
+	*) period	the length of a single time-step
+	*) length	total amount X of numbers to be summed
+OUT:
+	*) sumx		The sum of squared 'length' time-steps
+*/
 double APqrPIDLTLP4::sumx2(double period, double dlength)
 {
 	double sumx2 = 0;
@@ -168,6 +311,24 @@ double APqrPIDLTLP4::sumx2(double period, double dlength)
 	return sumx2;
 }
 
+/*
+execute
+-------
+This is the main funtcion of the code that is looped through real-time.
+It contains the four main parts of the algorithm:
+	1) Reading in the ideal AP
+	2) Detecting AP upstrokes
+	3) Computing AP correction and outputting this
+	4) Updating the necessary variables
+
+IN:
+	*) None
+OUT:
+	*) VLED1	voltage that is used to power the first LED driver that
+				regulates the light that is shined onto the cells
+	*) VLED2 	voltage that is used to power the second LED driver that
+				regulates the light that is shined onto the cells
+*/
 void APqrPIDLTLP4::execute(void)
 {
 	systime = idx * dt; // time in milli-seconds
@@ -185,34 +346,75 @@ void APqrPIDLTLP4::execute(void)
 		output(1) = 0;
 	}
 
-	// Part of the code that resets the counter once a new AP is detected	
+	// ****************************
+	// ****************************
+	// ** Detecting AP upstrokes **
+	// ****************************
+	// ****************************
 	if (act == 0 && (Vm - Vm_log[(idx2-(int)(1/dt)) % wave.size()]) >= slope_thresh && Vm > V_cutoff)
 	{
-		idx = 0;		
-		act = 1;
+		// This statement is entered whenever an upstroke is detected after the
+		// ideal APs have been recorded.
+		// The if conditions measure the following:
+		// 1) Whether currently nothing is being done or corrected
+		// 2) Whether two consecutive measuring points show a large enough slope that can
+		//    be identified with an upstroke
+		// 3) Whether the mesured voltage is above a voltage treshold
+
+		idx = 0; // Reset the correction index/counter
+		act = 1; // Switch the correction on
 	}
 
+	// Part of the code that implements the PID
 	if (act == 1){
-		iAP = wave[idx] * gain + offset;
-		Vm_diff_log[idx] = Vm - iAP;
-		if (VLED < 5 && (Vm < blue_Vrev || Vm_diff_log[idx] > 0)) //this line was modified so that Int is only calculated when the output has not reached its maximum (5V) and either hyperpolarization is needed (red ch) or depolarization is needed (blue ch) and Vm is more negative than blue_Vrev.
-		{Int = Int + Vm_diff_log[idx];}
+		// This statement is entered whenever the instruction to correct the AP has
+		// been given.
+
+		iAP = wave[idx] * gain + offset; // adjust the values from the AP-file in case necessary
+
+		// ************************************
+		// * Calculate the proportional error *
+		// ************************************
+		Vm_diff_log[idx] = Vm - iAP; // Log the errors
+		// ***************************************
+		// * Calculate the integral of the error *
+		// ***************************************
+		if (VLED < 5 && (Vm < blue_Vrev || Vm_diff_log[idx] > 0))
+		{
+			// Int is only calculated when the voltage LED output has not reached
+			// its maximum (5V) and on eof two conditiosn is satisfied: depolarization
+			// is needed (blue ch) and Vm is more negative than blue_Vrev, or
+			// hyperpolarization is needed (red ch).
+			// This step was taken such that the Int term cannot amass further when
+			// the system can not react to it.
+
+			Int = Int + Vm_diff_log[idx];
+		}
+		// *****************************************
+		// * Calculate the derivative of the error *
+		// *****************************************
+		// Calculate the numerator for a linear regression between the last "length" amount of points.
+		// This larger amount of points is chosen to cut out the noise that is intrinsically present
+		// in a membrane potential recording.
 		num = dlength *(sumxy(Vm_diff_log, idx, dlength, dt, modulo)) - sumx(dt, dlength)*sumy(Vm_diff_log, idx, dlength, modulo);
+		// Calculate the denominator
 		denom = dlength*sumx2(dt, dlength) - sumx(dt, dlength)*sumx(dt, dlength);
+		// Calculate the derivative when the denominator is not too small
 		if (abs(denom) < 0.001)
 			{slope = 10000;}
 		else
 			{slope = num/denom;} // Slope is measured in mV/ms
 	
-	
-	
+		// ************************************
+		// * Calculate the separate PID terms *
+		// ************************************	
 		P = K_p * Vm_diff_log[idx]; // Term that is proportional to the instantaneous difference in voltage.
 		I = K_i * Int; // Term that speeds up or slows down the rate of change based on the history of voltage differences.
 		D = K_d * slope; // Term that predicts the bahviour that is about to happen and helps in stabilizing.
 
-		PID_diff = PID;
-		PID = P + I + D;
-		PID_diff = PID_diff - PID;
+		PID_diff = PID; // Update the PID difference term
+		PID = P + I + D; // Calculate the sum of all the individual terms
+		PID_diff = PID_diff - PID; // Calculate the PID difference term
 
 		if (idx >= corr_start-1 && abs(PID_diff) > PID_tresh){
 			// PID_tresh gives a value that bounds the actions of the output (applies to PID_diff).
@@ -220,27 +422,35 @@ void APqrPIDLTLP4::execute(void)
 			// This explains the lack of an else case.
 			if (PID < 0 && abs(PID) > min_PID && Vm < blue_Vrev)
 			{
+				// If PID is smaller than 0, a depolarizing current is needed. Therefore here the output for
+				// the blue LED driver is calculated. However, blu elight has no influence when the membrane
+				// potential is larger than the reversal potential of the light-gated channel. Hence, an extra limit
+				// was imposed to limit this.
 				// min_PID gives a value where you don't consider it necessary to correct anything (applies to PID).
-				// So when the absolute value is smaller than this value, the output will be set to 0.
-				// This is the else case.
-				VLED = -PID * (1/Rm_blue);			
-				if (VLED > 5){VLED = 5;}
-				output(0) = VLED;
-				output(1) = 0;
+				// So when the absolute value is smaller than this value, the output will be set to 0 (in the else case later on).
+
+				VLED = -PID * (1/Rm_blue); // Calculate VLED by applying a LED-specific factor
+				if (VLED > 5){VLED = 5;} // Limit the LED driver output to its maximum value
+				output(0) = VLED; // Send output to the blue LED driver
+				output(1) = 0; // Make sure the red LED driver does not receive any output
 			}
 			else if (PID > 0 && abs(PID) > min_PID)
 			{
-				VLED = PID * (1/Rm_red);
+				// If PID is larger than 0, a repolarizing current is needed. Therefore here the output for
+				// the red LED driver is calculated.
+
+				VLED = PID * (1/Rm_red); // Calculate VLED by applying a LED-specific factor
 				// Rm_red scales the amount of applied light for the red channel.
 				// By lowering this value compared to Rm_blue, it is possible to counteract the smaller effect of repolarizing currents than depolarizing currents.
-				if (VLED > 5){VLED = 5;}	
-				output(1) = VLED;
-				output(0) = 0;		
+				if (VLED > 5){VLED = 5;} // Limit the LED driver output to its maximum value
+				output(1) = VLED; // Send output to the red LED driver
+				output(0) = 0; // Make sure the blue LED driver does not receive any output
 			}
 			else
 			{
-				output(0) = 0;
-				output(1) = 0;
+				// In all other cases, don't shine any light
+				output(0) = 0; // Make sure the blue LED driver does not receive any output
+				output(1) = 0; // Make sure the red LED driver does not receive any output
 			}			
 		}
 		
@@ -283,6 +493,23 @@ void APqrPIDLTLP4::customizeGUI(void)
 	setLayout(customlayout);
 }
 
+/*
+Update
+------
+This function updates the parameters of the code depending on the flag that is 
+given to it, where each flag is associated to a button.
+INIT: associated to the loading of the module
+MODIFY: associated to the Modify button
+PERIOD: associated to the period linker with the "system control panel" module
+PAUSE: associate to the pause button when pressing on it
+UNPAUSE: associated to the pause button when unpressing it
+
+IN:
+	*) flag				Indicating the state of the update:
+						INIT, MODIFY, PERIOD, PAUSE, UNPAUSE
+OUT:
+	*) None
+*/
 void APqrPIDLTLP4::update(DefaultGUIModel::update_flags_t flag)
 {
 	switch (flag) {
@@ -375,6 +602,17 @@ void APqrPIDLTLP4::update(DefaultGUIModel::update_flags_t flag)
 	}
 }
 
+/*
+initParameters
+--------------
+This function sets all values to their defaults when no external parameters are provided
+through the GUI interface.
+
+IN:
+	*) None
+OUT:
+	*) None
+*/
 void APqrPIDLTLP4::initParameters()
 {
 	dt = RT::System::getInstance()->getPeriod() * 1e-6; // ms

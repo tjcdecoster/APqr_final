@@ -16,14 +16,11 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 */
 
-/*
-* Reads values from ACSII file and adjusts a light-based signal in real-time
-*/
-
 #include <default_gui_model.h>
 #include <plotdialog.h>
 #include <basicplot.h>
 
+// All parameters and functions related to the gAPqrPIDLTLP4 class.
 class APqrPIDLTLP4 : public DefaultGUIModel
 {
     Q_OBJECT

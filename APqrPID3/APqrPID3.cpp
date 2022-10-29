@@ -85,6 +85,18 @@ extern "C" Plugin::Object *createRTXIPlugin(void)
 	return new gAPqrPID3();
 }
 
+/*
+vars[]
+----
+This is not a function, but rather the construction of a list. This list contains
+all the variables that are visible and/or modifiable in the GUI of the software
+module. There is the choice between INPUT, OUTPUT, PARAMETER and STATE.
+
+INPUT: connected to the input port
+OUTPUT: connected to the output port
+PARAMETER: modifiable variable in the code
+STATE: non-modifiable variable in the code
+*/
 static DefaultGUIModel::variable_t vars[] = {
 	{ "Vm (mV)", "Membrane potential (mV)", DefaultGUIModel::INPUT, },
 	{ "VLED1", "Output for LED driver", DefaultGUIModel::OUTPUT, },
@@ -395,16 +407,16 @@ void gAPqrPID3::execute(void)
 		// * Calculate the integral of the error *
 		// ***************************************
 		if (VLED < 5 && (Vm < blue_Vrev || Vm_diff_log[count] > 0)) 
-			{
-				// Int is only calculated when the voltage LED output has not reached
-				// its maximum (5V) and on eof two conditiosn is satisfied: depolarization
-				// is needed (blue ch) and Vm is more negative than blue_Vrev, or
-				// hyperpolarization is needed (red ch).
-				// This step was taken such that the Int term cannot amass further when
-				// the system can not react to it.
-				
-				Int = Int + Vm_diff_log[count];
-				}
+		{
+			// Int is only calculated when the voltage LED output has not reached
+			// its maximum (5V) and on eof two conditiosn is satisfied: depolarization
+			// is needed (blue ch) and Vm is more negative than blue_Vrev, or
+			// hyperpolarization is needed (red ch).
+			// This step was taken such that the Int term cannot amass further when
+			// the system can not react to it.
+		
+			Int = Int + Vm_diff_log[count];
+		}
 		// *****************************************
 		// * Calculate the derivative of the error *
 		// *****************************************
