@@ -89,7 +89,6 @@ static DefaultGUIModel::variable_t vars[] = {
 	{ "Vm (mV)", "Membrane potential (mV)", DefaultGUIModel::INPUT, },
 	{ "VLED1", "Output for LED driver", DefaultGUIModel::OUTPUT, },
 	{ "VLED2", "Output for LED driver", DefaultGUIModel::OUTPUT, },	
-	{ "iAP", "ideal AP", DefaultGUIModel::STATE, },
 	{ "V_cutoff (mV)", "Threshold potential for the detection of the beginning of an AP, together with Slope_thresh", 
 	DefaultGUIModel::PARAMETER | DefaultGUIModel::DOUBLE, },
 	{ "Slope_thresh (mV/ms)", "SLope threshold that defines the beginning of the AP (mV/ms)",
@@ -120,7 +119,6 @@ static DefaultGUIModel::variable_t vars[] = {
 	DefaultGUIModel::PARAMETER | DefaultGUIModel::DOUBLE, },
 	{ "reset_I_on", "value that indicates whetehr or not to reset I at RMP",
 	DefaultGUIModel::PARAMETER | DefaultGUIModel::DOUBLE, },
-	{ "Vm2 (mV)", "Membrane potential (mV)", DefaultGUIModel::STATE, },
 	{ "P", "P term", DefaultGUIModel::STATE, },
 	{ "I", "I term", DefaultGUIModel::STATE, },
 	{ "D", "D term", DefaultGUIModel::STATE, },
@@ -128,13 +126,8 @@ static DefaultGUIModel::variable_t vars[] = {
 	{ "Period (ms)", "Period (ms)", DefaultGUIModel::STATE, }, 
 	{ "Time (ms)", "Time (ms)", DefaultGUIModel::STATE, },
 	{ "APs2", "APs", DefaultGUIModel::STATE, },
-	{ "log_ideal_on2", "log_ideal_on", DefaultGUIModel::STATE, },
 	{ "BCL2", "BCL", DefaultGUIModel::STATE, },
-	{ "enter2", "enter", DefaultGUIModel::STATE, },
 	{ "act2", "0 or 1", DefaultGUIModel::STATE, },
-	{ "count", "number", DefaultGUIModel::STATE, },
-	{ "count2", "number", DefaultGUIModel::STATE, },
-	{ "modulo_state", "number", DefaultGUIModel::STATE, },
 };
 
 /*
@@ -189,6 +182,20 @@ void gAPqrPID3::cleanup()
 	}
 }
 
+/*
+sumy
+----
+Sum of X elements in an array.
+This function is used in the calculation of the derivative term.
+
+IN:
+	*) arr[]	Array with summable elements
+	*) n		index where you should end summing
+	*) length	total amount X of numbers to be summed
+	*) modulo	length of the array arr[]
+OUT:
+	*) sumy		The sum of 'length' elements in the array arr[]
+*/
 double gAPqrPID3::sumy(double arr[], int n, double length, double modulo)
 {
     double sumy = 0; // initialize sum
@@ -201,6 +208,22 @@ double gAPqrPID3::sumy(double arr[], int n, double length, double modulo)
     return sumy;
 }
 
+/*
+sumxy
+----
+Sum of X elements in an array multiplied by time/period.
+This function is used in the calculation of the derivative term.
+
+IN:
+	*) arr[]	Array with summable elements
+	*) n		index where you should end summing
+	*) length	total amount X of numbers to be summed
+	*) period	the length of a single time-step
+	*) modulo	length of the array arr[]
+OUT:
+	*) sumxy		The sum of 'length' elements in the array arr[] multiplied
+				by time-step
+*/
 double gAPqrPID3::sumxy(double arr[], int n, double length, double period, double modulo)
 {
     double sumxy = 0; // initialize sum
@@ -217,6 +240,18 @@ double gAPqrPID3::sumxy(double arr[], int n, double length, double period, doubl
     return sumxy;
 }
 
+/*
+sumx
+----
+Sum of X time-step elements.
+This function is used in the calculation of the derivative term.
+
+IN:
+	*) period	the length of a single time-step
+	*) length	total amount X of numbers to be summed
+OUT:
+	*) sumx		The sum of 'length' time-steps
+*/
 double gAPqrPID3::sumx(double period, double length)
 {
 	double sumx = 0;
@@ -227,6 +262,18 @@ double gAPqrPID3::sumx(double period, double length)
 	return sumx;
 }
 
+/*
+sumx2
+----
+Sum of X squared time-step elements.
+This function is used in the calculation of the derivative term.
+
+IN:
+	*) period	the length of a single time-step
+	*) length	total amount X of numbers to be summed
+OUT:
+	*) sumx		The sum of squared 'length' time-steps
+*/
 double gAPqrPID3::sumx2(double period, double length)
 {
 	double sumx2 = 0;
@@ -237,6 +284,24 @@ double gAPqrPID3::sumx2(double period, double length)
 	return sumx2;
 }
 
+/*
+execute
+-------
+This is the main funtcion of the code that is looped through real-time.
+It contains the four main parts of the algorithm:
+	1) Recording the ideal AP
+	2) Detecting AP upstrokes
+	3) Computing AP correction and outputting this
+	4) Updating the necessary variables
+
+IN:
+	*) None
+OUT:
+	*) VLED1	voltage that is used to power the first LED driver that
+				regulates the light that is shined onto the cells
+	*) VLED2 	voltage that is used to power the second LED driver that
+				regulates the light that is shined onto the cells
+*/
 void gAPqrPID3::execute(void)
 {
 	systime = count * period;	// time in milli-seconds
@@ -319,24 +384,52 @@ void gAPqrPID3::execute(void)
 	// Part of the code that implements the PID
 	if (act == 1)
 	{
-		iAP = ideal_AP[count];
-		Vm_diff_log[count] = Vm - ideal_AP[count];
-		if (VLED < 5 && (Vm < blue_Vrev || Vm_diff_log[count] > 0)) //this line was modified so that Int is only calculated when the output has not reached its maximum (5V) and either hyperpolarization is needed (red ch) or depolarization is needed (blue ch) and Vm is more negative than blue_Vrev.
-			{Int = Int + Vm_diff_log[count];}
+		// This statement is entered whenever the instruction to correct the AP has
+		// been given.
+
+		// ************************************
+		// * Calculate the proportional error *
+		// ************************************
+		Vm_diff_log[count] = Vm - ideal_AP[count]; // Log the errors
+		// ***************************************
+		// * Calculate the integral of the error *
+		// ***************************************
+		if (VLED < 5 && (Vm < blue_Vrev || Vm_diff_log[count] > 0)) 
+			{
+				// Int is only calculated when the voltage LED output has not reached
+				// its maximum (5V) and on eof two conditiosn is satisfied: depolarization
+				// is needed (blue ch) and Vm is more negative than blue_Vrev, or
+				// hyperpolarization is needed (red ch).
+				// This step was taken such that the Int term cannot amass further when
+				// the system can not react to it.
+				
+				Int = Int + Vm_diff_log[count];
+				}
+		// *****************************************
+		// * Calculate the derivative of the error *
+		// *****************************************
+		// Calculate the numerator for a linear regression between the last "length" amount of points.
+		// This larger amount of points is chosen to cut out the noise that is intrinsically present
+		// in a membrane potential recording.
 		num = length *(sumxy(Vm_diff_log, count, length, period, modulo)) - sumx(period, length)*sumy(Vm_diff_log, count, length, modulo);
+		// Calculate the denominator
 		denom = length*sumx2(period, length) - sumx(period, length)*sumx(period, length);
+		// Calculate the derivative when the denominator is not too small
 		if (abs(denom) < 0.001)
 			{slope = 10000;}
 		else
 			{slope = num/denom;} // Slope is measured in mV/ms
 
+		// ************************************
+		// * Calculate the separate PID terms *
+		// ************************************
 		P = K_p * Vm_diff_log[count]; // Term that is proportional to the instantaneous difference in voltage.
 		I = K_i * Int; // Term that speeds up or slows down the rate of change based on the history of voltage differences.
 		D = K_d * slope; // Term that predicts the behaviour that is about to happen and helps in stabilizing.
 
-		PID_diff = PID;
-		PID = P + I + D;
-		PID_diff = PID_diff - PID;
+		PID_diff = PID; // Update the PID difference term
+		PID = P + I + D; // Calculate the sum of all the individual terms
+		PID_diff = PID_diff - PID; // Calculate the PID difference term
 
 		if (count >= corr_start-1 && abs(PID_diff) > PID_tresh){
 			// PID_tresh gives a value that bounds the actions of the output (applies to PID_diff).
@@ -344,39 +437,50 @@ void gAPqrPID3::execute(void)
 			// This explains the lack of an else case.
 			if (PID < 0 && abs(PID) > min_PID && Vm < blue_Vrev)
 			{
+				// If PID is smaller than 0, a depolarizing current is needed. Therefore here the output for
+				// the blue LED driver is calculated. However, blu elight has no influence when the membrane
+				// potential is larger than the reversal potential of the light-gated channel. Hence, an extra limit
+				// was imposed to limit this.
 				// min_PID gives a value where you don't consider it necessary to correct anything (applies to PID).
-				// So when the absolute value is smaller than this value, the output will be set to 0.
-				// This is the else case.
-				VLED = -PID * (1/Rm_blue);			
-				if (VLED > 5){VLED = 5;}
-				output(0) = VLED;
-				output(1) = 0;
+				// So when the absolute value is smaller than this value, the output will be set to 0 (in the else case later on).
+
+				VLED = -PID * (1/Rm_blue); // Calculate VLED by applying a LED-specific factor
+				if (VLED > 5){VLED = 5;} // Limit the LED driver output to its maximum value
+				output(0) = VLED; // Send output to the blue LED driver
+				output(1) = 0; // Make sure the red LED driver does not receive any output
 			}
 			else if (PID > 0 && abs(PID) > min_PID)
 			{
-				VLED = PID * (1/Rm_red);
+				// If PID is larger than 0, a repolarizing current is needed. Therefore here the output for
+				// the red LED driver is calculated.
+
+				VLED = PID * (1/Rm_red); // Calculate VLED by applying a LED-specific factor
 				// Rm_red scales the amount of applied light for the red channel.
 				// By lowering this value compared to Rm_blue, it is possible to counteract the smaller effect of repolarizing currents than depolarizing currents.
-				if (VLED > 5){VLED = 5;}	
-				output(1) = VLED;
-				output(0) = 0;		
+				if (VLED > 5){VLED = 5;} // Limit the LED driver output to its maximum value
+				output(1) = VLED; // Send output to the red LED driver
+				output(0) = 0; // Make sure the blue LED driver does not receive any output
 			}
 			else
 			{
-				output(0) = 0;
-				output(1) = 0;
+				// In all other cases, don't shine any light
+				output(0) = 0; // Make sure the blue LED driver does not receive any output
+				output(1) = 0; // Make sure the red LED driver does not receive any output
 			}			
 		}
 	}
 	else
 	{
-		output(0) = 0;
-		output(1) = 0;
+		// When not acting (act=0), don't shine any light
+		output(0) = 0; // Make sure the blue LED driver does not receive any output
+		output(1) = 0; // Make sure the red LED driver does not receive any output
 	}
 
 	// This part of the code resets the I and D terms when the measured AP is very close to resting membrane potential (This
 	// is taken as the value close to the end of the ideal AP)
-	if (reset_I_on && abs(Vm - ideal_AP[int(BCL_cutoff*BCL)]) < 0.005){
+	// As a default reset_I_on is set at 0, and was not used in the paper results, but it can be
+	// a useful feature when testing new cell types. This method was tested and works.
+	if (reset_I_on && abs(Vm - ideal_AP[int(BCL_cutoff*BCL)]) < 0.5){
 		idx_diff = count - prev_idx;
 		prev_idx = count;
 		if (idx_diff == 1){
@@ -393,16 +497,16 @@ void gAPqrPID3::execute(void)
 
 	// This part of the code makes sure no output is produced in the last part of the action potential to let the cell come to rest.
 	if (count > BCL_cutoff*BCL){
-		act = 0;
-		output(0) = 0;
-		output(1) = 0;
+		// This statement is entered whenever the end of an AP is reached.
+		// The if condition measures the following:
+		// 1) Whether the current AP is further than a chosen cutoff of the pre-determined basic cycle length
+
+		act = 0; // Stop correcting during the last phase of the AP (is RMP)
+		output(0) = 0; // Send a 0 output since the last output is otherwise kept
+		output(1) = 0; // Send a 0 output since the last output is otherwise kept
 	}
 
-	count++;
-
-	count_r = (double)count/1000.0; // For display purposes
-	count2_r = (double)count2/1000.0; // For display purposes
-
+	count++; // End of the real-time loop, adjust the counter
 }
 
 /*
@@ -442,18 +546,11 @@ void gAPqrPID3::update(DefaultGUIModel::update_flags_t flag)
 		setParameter("PID_tresh", PID_tresh);
 		setParameter("min_PID", min_PID);
 		setParameter("reset_I_on", reset_I_on);
-		setState("Vm2 (mV)", Vm);
 		setState("Time (ms)", systime);
 		setState("Period (ms)", period);
 		setState("APs2", APs);
-		setState("log_ideal_on2", log_ideal_on);
 		setState("BCL2", BCL);
-		setState("enter2", enter);
 		setState("act2", act);
-		setState("count", count_r);
-		setState("count2", count2_r);
-		setState("modulo_state", modulo);
-		setState("iAP", iAP);
 		setState("P", P);
 		setState("I", I);
 		setState("D", D);
@@ -517,49 +614,54 @@ OUT:
 */
 void gAPqrPID3::initParameters()
 {
-	Vm = -80; // mV
-	Rm_blue = 150; // MOhm
-	Rm_red = 50; // MOhm
-	slope_thresh = 5.0; // mV
-	corr_start = 0;
-	blue_Vrev = -20;
-	VLED = 0;
-	output(0) = 0;
-	output(1) = 0;
-	period = RT::System::getInstance()->getPeriod() * 1e-6; // ms
+	// system related parameters
 	systime = 0;
-	count = 0;
-	idx_diff = 0;
-	prev_idx = 0;
-	reset_I_counter = 0;
-	PID = 0;
-	length = 10;
-	act = 0;
-	iAP=0;
-	BCL = 0;
-	count2 = 0;
-	APs = -1;
-	V_cutoff = -40;
-	BCL_cutoff = 0.8;
-	enter = 0;
+	period = RT::System::getInstance()->getPeriod() * 1e-6; // ms
+	// cell related parameters
+	Vm = -80; 			// mV
+	Rm_blue = 150; 		// MOhm
+	Rm_red = 50;		// MOhm
+	// upstroke related parameters
+	slope_thresh = 5.0; // mV
+	V_cutoff = -40;		// mV
+	// logging parameters
 	log_ideal_on = 0;
 	lognum = 3;
-	count_r = 0;
-	count2_r = 0;
-	modulo = (1.0/(RT::System::getInstance()->getPeriod() * 1e-6)) * 1000.0;
-	Int = 0;
-	num = 0;
-	denom = 1;
-	slope = 0;
+	APs = -1;
+	count2 = 0;
+	// correction parameters
+	act = 0;
+	corr_start = 0;
+	PID_tresh = 0.1;
+	min_PID = 0.2;
+	blue_Vrev = -20;
+
+	PID = 0;
 	P = 0;
 	I = 0;
 	D = 0;
 	K_p = 1;
 	K_i = 0.1;
 	K_d = 0.1;
+	Int = 0;
+	length = 10;
+	num = 0;
+	denom = 1;
+	slope = 0;
 	PID_diff = 0;
-	PID = 0;
-	PID_tresh = 0.1;
-	min_PID = 0.2;
+
 	reset_I_on = 0;
+	idx_diff = 0;
+	prev_idx = 0;
+	reset_I_counter = 0;
+
+	// standard loop parameters
+	count = 0;
+	enter = 0;
+	BCL = 0;			// ms
+	BCL_cutoff = 0.8;
+	modulo = (1.0/(RT::System::getInstance()->getPeriod() * 1e-6)) * 1000.0;
+	VLED = 0;
+	output(0) = 0;
+	output(1) = 0;
 }

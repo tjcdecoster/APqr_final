@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 
+// All parameters and functions related to the gAPqrPID3 class.
 class gAPqrPID3 : public DefaultGUIModel
 {
 
@@ -34,57 +35,64 @@ class gAPqrPID3 : public DefaultGUIModel
 		virtual void update(DefaultGUIModel::update_flags_t);
 		
 	private:
+		// functions
 		void cleanup();
+		long long i;
 		void initParameters();
 		double sumy(double arr[], int n, double length, double modulo);
 		double sumxy(double arr[], int n, double length, double period, double modulo);
 		double sumx(double period, double length);
 		double sumx2(double period, double length);
-		double Vm;
-		double period;
-		double Rm_blue;
-		double Rm_red;
-		double slope_thresh;
-		double VLED;
+		// system related parameters
 		double systime;
-		double count_r;
-		double count2_r;
-		long long count;
+		double period;
+		// arrays
 		double Vm_log[10000] = {0};		
 		double ideal_AP[10000] = {0};
-		long long count2;
-		double enter;
-		double BCL;
-		double BCL_cutoff;
-		double noise_tresh;
-		double V_cutoff;
-		double log_ideal_on;
-		double APs;
-		double act;
-		long long i;
 		double Vm_diff_log[10000] = {0};
-		double iAP;
+		// cell related parameters
+		double Vm;
+		double Rm_blue;
+		double Rm_red;
+		// Upstroke related parameters
+		double slope_thresh;
+		double V_cutoff;
+		// logging parameters
+		double log_ideal_on;
 		double lognum;
-		double modulo;
+		double APs;
+		long long count2;
+		// correction parameters
+		double act;
 		double corr_start;
+		double PID_tresh;
+		double min_PID;
 		double blue_Vrev;
+
 		double PID;
-		double length;
-		double Int;
-		double num;
-		double denom;
-		double slope;
 		double P;
 		double I;
 		double D;
 		double K_p;
 		double K_i;
 		double K_d;
+		double Int;
+		double length;
+		double num;
+		double denom;
+		double slope;
 		double PID_diff;
-		double PID_tresh;
-		double min_PID;
+
 		double reset_I_on;
 		double idx_diff;
 		double prev_idx;
 		double reset_I_counter;
+
+		// standard loop parameters
+		long long count;
+		double enter;
+		double BCL;
+		double BCL_cutoff;
+		double modulo;
+		double VLED;
 };
