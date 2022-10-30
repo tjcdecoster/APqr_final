@@ -33,13 +33,18 @@ with the use of LED-controlled illumination on optogenetically
 modified cells.
 
 IN:
+	*) Loops			Number of Times to Loop Data From File (called iAP)
+	*) gain				Factor to amplify iAP
+	*) offset			Factor to offset iAP (mV)
+	*) Pulse_strength	Blue LED driver voltage (V) for pacing
+	*) Filename			ASCII Input File-name
+	*) Vm				Membrane potential (mV) coming from file
+	*) V_light_on		Threshold potential for when the pulse can be given to
+						the cells
 	*) V_cutoff			Threshold potential for the detection of the beginning
 						of an AP
 	*) Slope_tresh		Slope threshold that defines the beginning of the
 						AP (mV/ms)
-	*) BCL_cutoff		Threshold value for the end of an AP, given as a
-						percentage of the total APD
-	*) lognum			Number of APs that need to be logged as a reference
 	*) Rm_blue			Initial resistance for the blue LED channel
 	*) Rm_red			Initial resistance for the red LED channel
 	*) corr_start		Gives the possibility to start at a later time than
@@ -48,17 +53,16 @@ IN:
 	*) K_p				Scale factor for the proportional part of the PID
 	*) K_i				Scale factor for the integral part of the PID
 	*) K_d				Scale factor for the derivative part of the PID
-	*) length			Amount of points that need to be taken into account to
+	*) dlength			Amount of points that need to be taken into account to
 						find the derivative (slope of the linear trend line of
 						these points)
 	*) PID_tresh		treshold value under which the same output as before
 						gets repeated
 	*) min_PID			value under which the lights get switched off
-	*) reset_I_on		value that indicates whether or not to reset I at RMP
 OUT:
-	*) VLED1 			voltage that is used to power the first LED driver that
+	*) VLED_blue		voltage that is used to power the first LED driver that
 						regulates the light that is shined onto the cells
-	*) VLED2 			voltage that is used to power the second LED driver that
+	*) VLED_red			voltage that is used to power the second LED driver that
 						regulates the light that is shined onto the cells
 */
 
@@ -141,7 +145,6 @@ static DefaultGUIModel::variable_t vars[] = {
 	DefaultGUIModel::PARAMETER | DefaultGUIModel::DOUBLE, },
 	{ "min_PID", "value under which the lights get switched off",
 	DefaultGUIModel::PARAMETER | DefaultGUIModel::DOUBLE, },
-	{ "Vm2 (mV)", "Membrane potential (mV)", DefaultGUIModel::STATE, },
 	{ "P", "P term", DefaultGUIModel::STATE, },
 	{ "I", "I term", DefaultGUIModel::STATE, },
 	{ "D", "D term", DefaultGUIModel::STATE, },
@@ -151,9 +154,6 @@ static DefaultGUIModel::variable_t vars[] = {
 	{ "act", "act", DefaultGUIModel::STATE, },
 	{ "idx", "idx", DefaultGUIModel::STATE, },	
 	{ "idx2", "idx2", DefaultGUIModel::STATE, },
-	{ "modulo_state", "number", DefaultGUIModel::STATE, },
-	{ "Vm_V", "Vm_V", DefaultGUIModel::STATE, },
-	{ "iAP_V", "iAP_V", DefaultGUIModel::STATE, },
 };
 
 /*
@@ -334,14 +334,25 @@ void APqrPIDLTLP4::execute(void)
 	systime = idx * dt; // time in milli-seconds
 	Vm = input(0) * 1e2; // convert 10V to mV. Divided by 10 because the amplifier produces 10-fold amplified voltages. Multiplied by 1000 to vonvert V to mV.
 
-	Vm_log[idx2 % wave.size()] = Vm;
+	Vm_log[idx2 % wave.size()] = Vm; 	// Logging the measured Vm in a list
+										// where the wave.size component makes
+										// sure you keep cycling when you have
+										// reached the maximum number in the list.
 
 	if ((nloops && loop >= nloops) || !wave.size()) {
+		// Pause the working of this module as long as no File has been provided, or as soon
+		// as the maximal number of loops through this file has been reached
 		pauseButton->setChecked(true);
 		return;
 	}
 
 	if (act == 0 && Vm < V_light_on){
+		// This statement is entered whenever the cell is no longer in a state where an AP
+		// is forced upon it
+		// The if-conditions measure the following:
+		// 1) That you are currently not imprinting anything any more
+		// 2) That you are below the stimulation threshold
+
 		output(0) = pulse_strength;
 		output(1) = 0;
 	}
@@ -456,25 +467,36 @@ void APqrPIDLTLP4::execute(void)
 		
 	}
 
-	idx++;
-	idx2++;
+	idx++; // This is the total counter and does not get reset
+	idx2++; // This is the counter within one AP. WIll be reset after every upstroke
 
 	PID_copy = (double)PID;
 	act_copy = (double)act;
 	idx_copy = (double)idx;
 	idx2_copy = (double)idx2;
-	iAP_V = (double)iAP/1000;
-	Vm_V = (double)Vm/1000;
 
+	// This part of the code makes sure no output is produced in the last part of the action potential to let the cell come to rest.
+	// It also makes sure that the necessary variables are reset when the ASCII file came to an end.
 	if (idx2 >= wave.size()){
-		idx2 = 0;
-		act = 0;
-		output(0) = 0;
-		output(1) = 0;
-		if (nloops) ++loop;
+		idx2 = 0; // Reset the AP counter
+		act = 0; // Stop imprinting after the end of the file has been reached
+		output(0) = 0; // Send a 0 output since the last output is otherwise kept
+		output(1) = 0; // Send a 0 output since the last output is otherwise kept
+		if (nloops) ++loop; // Increase the loop counter for the amount of times we go through the ASCII file
 	}
 }
 
+/*
+customizeGUI
+------------
+Function that adds more buttons and functionality to the standard GUI.
+The added functions are there to support the reading of an ASCII file.
+
+IN:
+	*) None
+OUT:
+	*) None
+*/
 void APqrPIDLTLP4::customizeGUI(void)
 {
 	QGridLayout *customlayout = DefaultGUIModel::getLayout();
@@ -535,17 +557,13 @@ void APqrPIDLTLP4::update(DefaultGUIModel::update_flags_t flag)
 			setParameter("dlength", dlength);
 			setParameter("PID_tresh", PID_tresh);
 			setParameter("min_PID", min_PID);
-			setState("Vm2 (mV)", Vm);
 			setState("Time (ms)", systime);
 			setState("Period (ms)", dt);
 			setState("PID", PID_copy);			
 			setState("act", act_copy);			
 			setState("idx", idx_copy);			
 			setState("idx2", idx2_copy);
-			setState("modulo_state", modulo);
 			setState("iAP", iAP);
-			setState("Vm_V", Vm_V);
-			setState("iAP_V", iAP_V);
 			setState("P", P);
 			setState("I", I);
 			setState("D", D);
@@ -615,49 +633,67 @@ OUT:
 */
 void APqrPIDLTLP4::initParameters()
 {
+	// system related parameters
+	systime = 0;
 	dt = RT::System::getInstance()->getPeriod() * 1e-6; // ms
+	// cell related parameters
+	Vm = -80; 			// mV
+	Rm_blue = 150; 		// MOhm
+	Rm_red = 50;		// MOhm
+	// upstroke related parameters
+	slope_thresh = 5.0; // mV
+	V_cutoff = -40;		// mV
+	V_light_on = -60; // mV
+	pulse_strength = 3; //V
+	// file reading related parameters
+	filename = "No file loaded.";
 	gain = 1;
 	offset = 0;
-	filename = "No file loaded.";
-	idx = 0;
-	idx2 = 0;
 	loop = 0;
 	nloops = 100;
 	length = 0;
-	pulse_strength = 3; //V
-	slope_thresh = 5.0; // mV
-	Vm = -80; // mV
-	Rm_blue = 150; // MOhm
-	Rm_red = 50; // MOhm
-	corr_start = 0;
-    	blue_Vrev = -20;
-	VLED = 0;	
-	output(0) = 0;
-	output(1) = 0;
-	systime = 0;
-	act = 0;
-	V_light_on = -60; // mV
-	V_cutoff = -40; // mV
 	iAP=-80;
+	// correction parameters
+	act = 0;
+	corr_start = 0;
+	PID_tresh = 0.1;
+	min_PID = 0.2;
+	blue_Vrev = -20;	// mV
+
 	PID = 0;
-	dlength = 10;
-	Int = 0;
-	num = 0;
-	denom = 1;
-	slope = 0;
 	P = 0;
 	I = 0;
 	D = 0;
 	K_p = 1;
 	K_i = 0.1;
 	K_d = 0.1;
+	Int = 0;
+	dlength = 10;
+	num = 0;
+	denom = 1;
+	slope = 0;
 	PID_diff = 0;
-	PID = 0;
-	PID_tresh = 0.1;
-	min_PID = 0.2;
+
+	// standard loop parameters
+	idx = 0;
+	idx2 = 0;
 	modulo = (1.0/(RT::System::getInstance()->getPeriod() * 1e-6)) * 1000.0;
+	VLED = 0;
+	output(0) = 0;
+	output(1) = 0;
 }
 
+/*
+loadFile
+--------
+Function that sets up the loadFile slot in the GUI. It links all the file's properties
+to its associated values.
+
+IN:
+	*) None
+OUT:
+	*) None
+*/
 void APqrPIDLTLP4::loadFile()
 {
 	QFileDialog* fd = new QFileDialog(this, "Wave Maker Input File");//, TRUE);
@@ -684,6 +720,16 @@ void APqrPIDLTLP4::loadFile()
 	} else setComment("File Name", "No file loaded.");
 }
 
+/*
+loadFile
+--------
+Function that reads in an ASCII file and gives a value to all file-related parameters.
+
+IN:
+	*) filename
+OUT:
+	*) None
+*/
 void APqrPIDLTLP4::loadFile(QString fileName)
 {
 	if (fileName == "No file loaded.") {
@@ -704,6 +750,17 @@ void APqrPIDLTLP4::loadFile(QString fileName)
 	}
 }
 
+/*
+previewFile
+-----------
+Function that opens a new dialog window to show the file that has been read in.
+This allows to quickly double check that you will be imprinting the correct AP(s).
+
+IN:
+	*) None
+OUT:
+	*) None
+*/
 void APqrPIDLTLP4::previewFile()
 {
 	double* time = new double[static_cast<int> (wave.size())];

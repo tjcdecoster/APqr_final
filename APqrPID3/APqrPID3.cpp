@@ -646,7 +646,7 @@ void gAPqrPID3::initParameters()
 	corr_start = 0;
 	PID_tresh = 0.1;
 	min_PID = 0.2;
-	blue_Vrev = -20;
+	blue_Vrev = -20;	// mV
 
 	PID = 0;
 	P = 0;
